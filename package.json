@@ -1,0 +1,63 @@
+{
+  "name": "@danieljanocha/local-mongo-db",
+  "version": "0.1.0",
+  "description": "Reusable CLI for managing a local MongoDB container (podman) with snapshots, pull/push to a hosted Atlas, and configurable env-var injection.",
+  "license": "MIT",
+  "author": "Daniel Janocha",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DJanocha/local-mongo-db.git"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "smoke": "tsx examples/smoke.ts"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "date-fns": "^3.6.0",
+    "inquirer": "^12.4.2",
+    "lodash": "^4.17.21",
+    "mongodb": "^6.9.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/inquirer": "^9.0.7",
+    "@types/lodash": "^4.17.7",
+    "@types/node": "^20.14.0",
+    "tsup": "^8.3.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.5.4"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "mongodb",
+    "cli",
+    "local-database",
+    "podman",
+    "mongodump",
+    "mongorestore",
+    "snapshot",
+    "atlas"
+  ]
+}

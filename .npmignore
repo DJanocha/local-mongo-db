@@ -1,0 +1,9 @@
+src/
+examples/
+.smoke/
+node_modules/
+tsconfig.json
+tsup.config.ts
+.gitignore
+.npmignore
+*.log
