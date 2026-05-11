@@ -1,6 +1,8 @@
 node_modules/
 dist/
 .smoke/
+.mongodb-binaries/
+coverage/
 *.log
 .DS_Store
 .env

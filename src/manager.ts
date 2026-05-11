@@ -20,6 +20,15 @@ const createSnapshotSlug = (name: string, date: Date = new Date()) => {
   return `${formattedDate}${dbSaveSeparator}${name}`;
 };
 
+export type LocalMongoManagerOptions = {
+  /**
+   * When `false`, the manager does NOT install SIGINT/SIGTERM/SIGHUP/
+   * uncaughtException/unhandledRejection handlers. Default `true`.
+   * Tests pass `false` so the test runner's own signal handling stays clean.
+   */
+  registerSignalHandlers?: boolean;
+};
+
 export class LocalMongoManager<EnvKey extends string = string> {
   private readonly config: ResolvedLocalMongoConfig<EnvKey>;
   private readonly dumpPath: string;
@@ -27,7 +36,10 @@ export class LocalMongoManager<EnvKey extends string = string> {
   private mongoProcess: ReturnType<typeof spawn> | null = null;
   private hostedAtlasUri: string | undefined = undefined;
 
-  constructor(config: ResolvedLocalMongoConfig<EnvKey>) {
+  constructor(
+    config: ResolvedLocalMongoConfig<EnvKey>,
+    options: LocalMongoManagerOptions = {},
+  ) {
     this.config = config;
 
     if (!fs.existsSync(config.localDbPath)) {
@@ -38,7 +50,9 @@ export class LocalMongoManager<EnvKey extends string = string> {
       fs.mkdirSync(this.dumpPath, { recursive: true });
     }
 
-    this.registerCleanupHandlers();
+    if (options.registerSignalHandlers !== false) {
+      this.registerCleanupHandlers();
+    }
   }
 
   private resolveEnvVariables(): readonly EnvVariable<EnvKey>[] {
@@ -296,7 +310,7 @@ export class LocalMongoManager<EnvKey extends string = string> {
   async duplicateHostedDb(
     baseDbName: string,
     copiedDbName: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       if (!fs.existsSync(this.config.envPath)) {
         throw new Error(
@@ -326,9 +340,10 @@ export class LocalMongoManager<EnvKey extends string = string> {
       execSync(`rm -rf "${backupPath}"`);
 
       console.log(`Successfully duplicated ${baseDbName} to ${copiedDbName}!`);
+      return true;
     } catch (error) {
       console.error("Error:", (error as Error).message);
-      process.exit(1);
+      return false;
     }
   }
 
@@ -432,7 +447,7 @@ export class LocalMongoManager<EnvKey extends string = string> {
     );
   }
 
-  pull() {
+  pull(): boolean {
     try {
       const atlasUrl = this.getHostedAtlasUri();
 
@@ -448,9 +463,10 @@ export class LocalMongoManager<EnvKey extends string = string> {
       console.log("Cleaning up temporary dump data...");
       execSync(`rm -rf "${this.dumpPath}"/*`);
       console.log("Cleanup complete!");
+      return true;
     } catch (error) {
       console.error("Error:", (error as Error).message);
-      process.exit(1);
+      return false;
     }
   }
 

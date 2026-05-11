@@ -9,3 +9,4 @@ export type {
 export { run } from "./run";
 export { buildCli } from "./cli";
 export { LocalMongoManager } from "./manager";
+export type { LocalMongoManagerOptions } from "./manager";
