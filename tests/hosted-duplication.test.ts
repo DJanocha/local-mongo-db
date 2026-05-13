@@ -42,14 +42,14 @@ describe("hosted-db duplication against mongo-memory-server", () => {
   let tmpDir: string;
   let envPath: string;
   let envLocalPath: string;
-  let localDbPath: string;
+  let dbSnapshotsPath: string;
   let manager: LocalMongoManager;
 
   beforeEach(() => {
     tmpDir = createTempDir("duplication");
     envPath = path.join(tmpDir, ".env");
     envLocalPath = path.join(tmpDir, ".env.local");
-    localDbPath = path.join(tmpDir, "localDb");
+    dbSnapshotsPath = path.join(tmpDir, "localDb");
 
     writeEnvFile(envPath, [{ envKey: "DATABASE_URL", value: hosted.uri }]);
 
@@ -57,12 +57,10 @@ describe("hosted-db duplication against mongo-memory-server", () => {
       resolveConfig({
         envPath,
         envLocalPath,
-        localDbPath,
+        dbSnapshotsPath,
         port: 0, // unused — we never hit the local container path here
         enableHostedDbDuplication: true,
-        envVariables: [
-          { envKey: "DATABASE_URL", value: "mongodb://localhost" },
-        ],
+        envKeyMapper: { dbUrl: "DATABASE_URL" },
       }),
       { registerSignalHandlers: false },
     );

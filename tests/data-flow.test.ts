@@ -47,14 +47,14 @@ describe("data-flow against mongo-memory-server", () => {
   let tmpDir: string;
   let envPath: string;
   let envLocalPath: string;
-  let localDbPath: string;
+  let dbSnapshotsPath: string;
   let manager: LocalMongoManager;
 
   beforeEach(async () => {
     tmpDir = createTempDir("data-flow");
     envPath = path.join(tmpDir, ".env");
     envLocalPath = path.join(tmpDir, ".env.local");
-    localDbPath = path.join(tmpDir, "localDb");
+    dbSnapshotsPath = path.join(tmpDir, "localDb");
 
     // Hosted env file points at hosted MMS.
     writeEnvFile(envPath, [{ envKey: "DATABASE_URL", value: hosted.uri }]);
@@ -68,12 +68,10 @@ describe("data-flow against mongo-memory-server", () => {
       resolveConfig({
         envPath,
         envLocalPath,
-        localDbPath,
+        dbSnapshotsPath,
         port: local.port, // matches `mongodb://localhost:${port}` in the manager
         enablePushToHosted: true,
-        envVariables: ({ port }) => [
-          { envKey: "DATABASE_URL", value: `mongodb://localhost:${port}` },
-        ],
+        envKeyMapper: { dbUrl: "DATABASE_URL" },
       }),
       { registerSignalHandlers: false },
     );
@@ -92,7 +90,7 @@ describe("data-flow against mongo-memory-server", () => {
 
       const slug = manager.save("snap-one");
       expect(slug).not.toBeNull();
-      const bsonFile = path.join(localDbPath, `${slug}.bson`);
+      const bsonFile = path.join(dbSnapshotsPath, `${slug}.bson`);
       expect(fs.existsSync(bsonFile)).toBe(true);
 
       // Wipe local DB, then reload from the snapshot.
@@ -185,12 +183,10 @@ describe("data-flow against mongo-memory-server", () => {
         resolveConfig({
           envPath,
           envLocalPath,
-          localDbPath,
+          dbSnapshotsPath,
           port: local.port,
           enablePushToHosted: false,
-          envVariables: [
-            { envKey: "DATABASE_URL", value: "mongodb://localhost" },
-          ],
+          envKeyMapper: { dbUrl: "DATABASE_URL" },
         }),
         { registerSignalHandlers: false },
       );

@@ -1,6 +1,6 @@
 {
   "name": "@danieljanocha/local-mongo-db",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Reusable CLI for managing a local MongoDB container (podman) with snapshots, pull/push to a hosted Atlas, and configurable env-var injection.",
   "license": "MIT",
   "author": "Daniel Janocha",
@@ -17,6 +17,9 @@
       "import": "./dist/index.js"
     }
   },
+  "bin": {
+    "local-mongo-db": "./dist/bin.js"
+  },
   "files": [
     "dist",
     "README.md",
@@ -26,7 +29,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
-    "smoke": "tsx examples/smoke.ts",
+    "smoke": "tsx src/bin.ts --config examples/smoke.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -34,6 +37,7 @@
     "commander": "^12.1.0",
     "date-fns": "^3.6.0",
     "inquirer": "^12.4.2",
+    "jiti": "^2.7.0",
     "lodash": "^4.17.21",
     "mongodb": "^6.9.0",
     "zod": "^3.23.8"

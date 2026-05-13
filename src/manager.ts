@@ -6,7 +6,10 @@ import { format } from "date-fns";
 import _ from "lodash";
 import { MongoClient } from "mongodb";
 
-import type { EnvVariable, ResolvedLocalMongoConfig } from "./define-config";
+import type {
+  EnvVariable,
+  ResolvedLocalMongoConfig,
+} from "./define-config";
 import { appendEnvVars, readEnvKey, removeEnvKeys } from "./env-file";
 import { delay } from "./utils/async";
 import { colors } from "./utils/colors";
@@ -29,23 +32,23 @@ export type LocalMongoManagerOptions = {
   registerSignalHandlers?: boolean;
 };
 
-export class LocalMongoManager<EnvKey extends string = string> {
-  private readonly config: ResolvedLocalMongoConfig<EnvKey>;
+export class LocalMongoManager {
+  private readonly config: ResolvedLocalMongoConfig;
   private readonly dumpPath: string;
   private isCleanupRunning = false;
   private mongoProcess: ReturnType<typeof spawn> | null = null;
   private hostedAtlasUri: string | undefined = undefined;
 
   constructor(
-    config: ResolvedLocalMongoConfig<EnvKey>,
+    config: ResolvedLocalMongoConfig,
     options: LocalMongoManagerOptions = {},
   ) {
     this.config = config;
 
-    if (!fs.existsSync(config.localDbPath)) {
-      fs.mkdirSync(config.localDbPath, { recursive: true });
+    if (!fs.existsSync(config.dbSnapshotsPath)) {
+      fs.mkdirSync(config.dbSnapshotsPath, { recursive: true });
     }
-    this.dumpPath = path.join(config.localDbPath, "dump");
+    this.dumpPath = path.join(config.dbSnapshotsPath, "dump");
     if (!fs.existsSync(this.dumpPath)) {
       fs.mkdirSync(this.dumpPath, { recursive: true });
     }
@@ -55,8 +58,8 @@ export class LocalMongoManager<EnvKey extends string = string> {
     }
   }
 
-  private resolveEnvVariables(): readonly EnvVariable<EnvKey>[] {
-    return this.config.envVariables({ port: this.config.port });
+  private resolveEnvVariables(): readonly EnvVariable[] {
+    return this.config.resolveEnvVariables({ port: this.config.port });
   }
 
   private registerCleanupHandlers() {
@@ -207,12 +210,12 @@ export class LocalMongoManager<EnvKey extends string = string> {
 
   /** Gets the local database URI from the configured env file. */
   private getLocalDbUri(): string {
-    const value = readEnvKey(
-      this.config.envLocalPath,
-      this.config.localConnectionEnvKey,
-    );
-    if (!value) return `mongodb://localhost:${this.config.port}`;
-    return value;
+    const primaryLocalKey = this.config.envKeyMapper.dbUrl[0];
+    if (primaryLocalKey) {
+      const value = readEnvKey(this.config.envLocalPath, primaryLocalKey);
+      if (value) return value;
+    }
+    return `mongodb://localhost:${this.config.port}`;
   }
 
   /** Gets the hosted Atlas URI from the configured env file. */
@@ -222,11 +225,11 @@ export class LocalMongoManager<EnvKey extends string = string> {
     }
     const value = readEnvKey(
       this.config.envPath,
-      this.config.hostedConnectionEnvKey,
+      this.config.hostedDbUrlEnvKey,
     );
     if (!value) {
       throw new Error(
-        `${this.config.hostedConnectionEnvKey} not found in ${this.config.envPath}`,
+        `${this.config.hostedDbUrlEnvKey} not found in ${this.config.envPath}`,
       );
     }
     return value;
@@ -513,7 +516,10 @@ export class LocalMongoManager<EnvKey extends string = string> {
         console.log("Successfully pushed local database to hosted MongoDB!");
         return true;
       } else {
-        const loadPath = path.join(this.config.localDbPath, `${source}.bson`);
+        const loadPath = path.join(
+          this.config.dbSnapshotsPath,
+          `${source}.bson`,
+        );
 
         if (!fs.existsSync(loadPath)) {
           console.error(`Error: Snapshot "${source}" does not exist`);
@@ -585,7 +591,7 @@ export class LocalMongoManager<EnvKey extends string = string> {
   }
 
   list(): string[] {
-    const files = fs.readdirSync(this.config.localDbPath);
+    const files = fs.readdirSync(this.config.dbSnapshotsPath);
     return files
       .filter((f) => f.endsWith(".bson"))
       .map((f) => f.replace(".bson", ""))
@@ -594,7 +600,10 @@ export class LocalMongoManager<EnvKey extends string = string> {
 
   save(name: string): string | null {
     const slug = createSnapshotSlug(name);
-    const savePath = path.join(this.config.localDbPath, `${slug}.bson`);
+    const savePath = path.join(
+      this.config.dbSnapshotsPath,
+      `${slug}.bson`,
+    );
 
     console.log(`Saving current database state...`);
     if (this.writeDbToBsonFile({ filePath: savePath })) {
@@ -605,7 +614,7 @@ export class LocalMongoManager<EnvKey extends string = string> {
   }
 
   load(slug: string): boolean {
-    const loadPath = path.join(this.config.localDbPath, `${slug}.bson`);
+    const loadPath = path.join(this.config.dbSnapshotsPath, `${slug}.bson`);
 
     if (!fs.existsSync(loadPath)) {
       console.error(`Error: Snapshot "${slug}" does not exist`);

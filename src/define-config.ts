@@ -1,18 +1,27 @@
-export type EnvVariable<EnvKey extends string = string> = {
-  envKey: EnvKey;
-  value: string;
-};
+import path from "node:path";
 
-export type EnvVariablesFactory<EnvKey extends string = string> = (ctx: {
+import type {
+  EnvKeyOrKeys,
+  LocalMongoEnvKeyMapper,
+} from "./build-local-mongo-env";
+
+export type EnvVariable = { envKey: string; value: string };
+
+export type EnvVariablesFactory = (ctx: {
   port: number;
-}) => readonly EnvVariable<EnvKey>[];
+}) => readonly EnvVariable[];
 
 export type NamespaceTransform = {
   from: string;
   to: string;
 };
 
-export type LocalMongoConfig<EnvKey extends string = string> = {
+export type LocalMongoEnvKeyMapperInput = {
+  dbUrl: EnvKeyOrKeys;
+  dbSource?: EnvKeyOrKeys;
+};
+
+export type LocalMongoConfig = {
   /** Podman container name. Defaults to `"mongodb"`. */
   containerName?: string;
   /** Local TCP port exposed by the container. Defaults to `27017`. */
@@ -20,26 +29,40 @@ export type LocalMongoConfig<EnvKey extends string = string> = {
   /** MongoDB community-server image tag. Defaults to `"6.0.13-ubi8"`. */
   version?: string;
 
-  /** Directory where `.bson` snapshots and the `dump/` working dir live. */
-  localDbPath: string;
-  /** Path to the file we inject local-mode env variables into (e.g. `.env.local`). */
+  /**
+   * Directory where `.bson` snapshots and the `dump/` working dir live.
+   * Resolved relative to the config file's directory when loaded via the
+   * `local-mongo-db` CLI; otherwise treated as-is.
+   */
+  dbSnapshotsPath: string;
+  /**
+   * Path to the env file the CLI injects local-mode env variables into
+   * (e.g. `.env.local`). Resolved relative to the config file when loaded
+   * via the CLI.
+   */
   envLocalPath: string;
-  /** Path to the env file we read the hosted Atlas URI from (e.g. `.env`). */
+  /**
+   * Path to the env file the CLI reads the hosted Atlas URI from
+   * (e.g. `.env`). Resolved relative to the config file when loaded via
+   * the CLI.
+   */
   envPath: string;
 
   /**
-   * Env variables to add when the local DB starts and remove during cleanup.
-   * Either a static list, or a factory called with the resolved port so
-   * connection strings can be templated.
+   * Maps canonical local-DB env concepts onto the env-var names your app
+   * actually reads. Pass either a single key or an array (legacy mirror).
+   * Use `buildLocalMongoEnv` to derive this together with a Zod schema slice.
    */
-  envVariables:
-    | readonly EnvVariable<EnvKey>[]
-    | EnvVariablesFactory<EnvKey>;
+  envKeyMapper: LocalMongoEnvKeyMapperInput;
+
+  /**
+   * Optional escape hatch for env variables that aren't covered by the
+   * canonical mapper. Same write/strip lifecycle as the mapper-derived ones.
+   */
+  extraEnvVariables?: EnvVariablesFactory;
 
   /** Env key read from `envPath` for the hosted Atlas URI. Defaults to `"DATABASE_URL"`. */
-  hostedConnectionEnvKey?: string;
-  /** Env key read from `envLocalPath` for the local DB URI. Defaults to `"DATABASE_URL"`. */
-  localConnectionEnvKey?: string;
+  hostedDbUrlEnvKey?: string;
 
   /** Enable the `push` action (writes local DB / snapshot to the hosted Atlas). Defaults to `false`. */
   enablePushToHosted?: boolean;
@@ -54,72 +77,110 @@ export type LocalMongoConfig<EnvKey extends string = string> = {
   namespaceTransform?: NamespaceTransform;
 };
 
-export type ResolvedLocalMongoConfig<EnvKey extends string = string> = Required<
-  Pick<
-    LocalMongoConfig<EnvKey>,
-    | "containerName"
-    | "port"
-    | "version"
-    | "localDbPath"
-    | "envLocalPath"
-    | "envPath"
-    | "hostedConnectionEnvKey"
-    | "localConnectionEnvKey"
-    | "enablePushToHosted"
-    | "enableHostedDbDuplication"
-  >
-> & {
-  envVariables: EnvVariablesFactory<EnvKey>;
-  namespaceTransform?: NamespaceTransform;
-};
+/** Fields of `LocalMongoConfig` that have defaults — required after resolution. */
+type WithDefaultsKey =
+  | "containerName"
+  | "port"
+  | "version"
+  | "hostedDbUrlEnvKey"
+  | "enablePushToHosted"
+  | "enableHostedDbDuplication";
+
+export type ResolvedLocalMongoConfig =
+  // Carry over fields that are already required (paths, namespaceTransform)
+  // and drop the ones that get reshaped (envKeyMapper) or folded away
+  // (extraEnvVariables → into resolveEnvVariables).
+  Omit<LocalMongoConfig, "envKeyMapper" | "extraEnvVariables" | WithDefaultsKey> &
+    Required<Pick<LocalMongoConfig, WithDefaultsKey>> & {
+      envKeyMapper: LocalMongoEnvKeyMapper;
+      /** Computes the full env-var list to write/strip at runtime. */
+      resolveEnvVariables: EnvVariablesFactory;
+    };
 
 const DEFAULTS = {
   containerName: "mongodb",
   port: 27017,
   version: "6.0.13-ubi8",
-  hostedConnectionEnvKey: "DATABASE_URL",
-  localConnectionEnvKey: "DATABASE_URL",
+  hostedDbUrlEnvKey: "DATABASE_URL",
   enablePushToHosted: false,
   enableHostedDbDuplication: false,
 } as const;
 
-export function resolveConfig<EnvKey extends string>(
-  config: LocalMongoConfig<EnvKey>,
-): ResolvedLocalMongoConfig<EnvKey> {
-  const envVariables: EnvVariablesFactory<EnvKey> =
-    typeof config.envVariables === "function"
-      ? config.envVariables
-      : () => config.envVariables as readonly EnvVariable<EnvKey>[];
+const toArray = (value: string | readonly string[] | undefined): string[] => {
+  if (value === undefined) return [];
+  return typeof value === "string" ? [value] : [...value];
+};
+
+const resolvePath = (value: string, configDir: string | undefined): string => {
+  if (path.isAbsolute(value)) return value;
+  if (!configDir) return value;
+  return path.resolve(configDir, value);
+};
+
+/**
+ * Normalize a `LocalMongoConfig` for runtime use. When `configFilePath` is
+ * provided, any relative path fields are resolved against the config file's
+ * directory (matches mongogrator semantics). Otherwise paths are kept as-is.
+ */
+export function resolveConfig(
+  config: LocalMongoConfig,
+  configFilePath?: string,
+): ResolvedLocalMongoConfig {
+  const configDir = configFilePath ? path.dirname(configFilePath) : undefined;
+
+  const dbUrlKeys = toArray(config.envKeyMapper.dbUrl);
+  const dbSourceKeys = toArray(config.envKeyMapper.dbSource);
+
+  if (dbUrlKeys.length === 0) {
+    throw new Error(
+      "resolveConfig: `envKeyMapper.dbUrl` must contain at least one env key.",
+    );
+  }
+
+  const seen = new Set<string>();
+  for (const key of [...dbUrlKeys, ...dbSourceKeys]) {
+    if (seen.has(key)) {
+      throw new Error(
+        `resolveConfig: env key "${key}" appears more than once in envKeyMapper.`,
+      );
+    }
+    seen.add(key);
+  }
+
+  const extras = config.extraEnvVariables;
+
+  const resolveEnvVariables: EnvVariablesFactory = ({ port }) => {
+    const localUri = `mongodb://localhost:${port}`;
+    const fromMapper: EnvVariable[] = [
+      ...dbUrlKeys.map((envKey) => ({ envKey, value: localUri })),
+      ...dbSourceKeys.map((envKey) => ({ envKey, value: "local" })),
+    ];
+    const fromExtras = extras ? extras({ port }) : [];
+    return [...fromMapper, ...fromExtras];
+  };
 
   return {
     containerName: config.containerName ?? DEFAULTS.containerName,
     port: config.port ?? DEFAULTS.port,
     version: config.version ?? DEFAULTS.version,
-    localDbPath: config.localDbPath,
-    envLocalPath: config.envLocalPath,
-    envPath: config.envPath,
-    hostedConnectionEnvKey:
-      config.hostedConnectionEnvKey ?? DEFAULTS.hostedConnectionEnvKey,
-    localConnectionEnvKey:
-      config.localConnectionEnvKey ?? DEFAULTS.localConnectionEnvKey,
+    dbSnapshotsPath: resolvePath(config.dbSnapshotsPath, configDir),
+    envLocalPath: resolvePath(config.envLocalPath, configDir),
+    envPath: resolvePath(config.envPath, configDir),
+    envKeyMapper: { dbUrl: dbUrlKeys, dbSource: dbSourceKeys },
+    hostedDbUrlEnvKey: config.hostedDbUrlEnvKey ?? DEFAULTS.hostedDbUrlEnvKey,
     enablePushToHosted:
       config.enablePushToHosted ?? DEFAULTS.enablePushToHosted,
     enableHostedDbDuplication:
       config.enableHostedDbDuplication ?? DEFAULTS.enableHostedDbDuplication,
-    envVariables,
     namespaceTransform: config.namespaceTransform,
+    resolveEnvVariables,
   };
 }
 
 /**
- * Identity helper for type-safe configuration of `@danieljanocha/local-mongo-db`.
- *
- * Pass a string-union type parameter (typically `keyof typeof env`) to narrow
- * `envVariables[].envKey` to your project's env schema so typos surface at
- * compile time.
+ * Identity helper for type-safe configuration. Authoring helper only —
+ * runtime resolution happens inside the CLI / `resolveConfig`.
  */
-export function defineConfig<EnvKey extends string = string>(
-  config: LocalMongoConfig<EnvKey>,
-): LocalMongoConfig<EnvKey> {
+export function defineConfig(config: LocalMongoConfig): LocalMongoConfig {
   return config;
 }

@@ -2,76 +2,85 @@
 
 A reusable CLI for managing a local MongoDB container (via podman), pulling/pushing data to a hosted Atlas, taking BSON snapshots, and injecting the right env vars into your local environment file while it runs.
 
-It replaces the copy-pasted `local-db.ts` script that ends up in every monorepo. You drop in a tiny entry script, configure it with `defineConfig`, and `pnpm local:db` keeps working.
+You write one `local-mongo-db.config.ts` and add one line to `package.json`. Done. No entry script, no `__dirname` plumbing.
 
 ## Install
 
 ```sh
-pnpm add -D @danieljanocha/local-mongo-db tsx
+pnpm add -D @danieljanocha/local-mongo-db
 ```
 
 You'll also need `podman`, `mongodump`, `mongorestore`, and `mongosh` on your PATH.
 
 ## Use
 
-Create `scripts/local-db.ts`:
-
-```ts
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-import { defineConfig, run } from "@danieljanocha/local-mongo-db";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const WORKSPACE_ROOT = path.resolve(__dirname, "../../..");
-
-void run(
-  defineConfig({
-    containerName: "mongodb",
-    port: 27011,
-    version: "6.0.13-ubi8",
-    localDbPath: path.join(__dirname, "../localDb"),
-    envLocalPath: path.join(WORKSPACE_ROOT, ".env.local"),
-    envPath: path.join(WORKSPACE_ROOT, ".env"),
-    envVariables: ({ port }) => [
-      { envKey: "DATABASE_URL", value: `mongodb://localhost:${port}` },
-      { envKey: "DB_SOURCE", value: "local" },
-    ],
-    enablePushToHosted: true,
-    enableHostedDbDuplication: true,
-  }),
-);
-```
-
-Then in `package.json`:
+### 1. Add the script
 
 ```jsonc
+// package.json
 {
   "scripts": {
-    "local:db": "pnpm with-env tsx scripts/local-db.ts"
+    "db:local": "local-mongo-db"
+    // or, with explicit path: "local-mongo-db --config ./local-db/config.ts"
   }
 }
 ```
 
-Run `pnpm local:db` — you get the interactive wizard. Pass flags to skip it.
+The CLI auto-discovers `local-mongo-db.config.{ts,js,mjs}` in the current working directory.
 
-## Type-safe env keys
-
-If you already have a typed env schema (e.g. `@t3-oss/env-nextjs`), pass its key union as a generic so typos in `envKey` become type errors:
+### 2. Create the config
 
 ```ts
-import type { env } from "@repo/env/web";
+// local-mongo-db.config.ts
+import { buildLocalMongoEnv, defineConfig } from "@danieljanocha/local-mongo-db";
 
-void run(
-  defineConfig<keyof typeof env & string>({
-    // ...
-    envVariables: ({ port }) => [
-      { envKey: "DATABASE_URL", value: `mongodb://localhost:${port}` },
-      // { envKey: "DB_URRL", value: "..." }, // ← would error: unknown key
-    ],
-  }),
-);
+export const localMongoEnv = buildLocalMongoEnv({
+  dbUrl: "DATABASE_URL",
+  // or mirror into legacy keys: dbUrl: ["DATABASE_URL", "MONGO_URI"],
+  dbSource: "NEXT_PUBLIC_DB_SOURCE", // optional label
+});
+
+export default defineConfig({
+  containerName: "mongodb",
+  port: 27011,
+  version: "6.0.13-ubi8",
+  dbSnapshotsPath: "./snapshots", // resolved relative to THIS file
+  envLocalPath: "../.env.local",
+  envPath: "../.env",
+  envKeyMapper: localMongoEnv.envKeyMapper,
+  enablePushToHosted: true,
+  enableHostedDbDuplication: true,
+});
 ```
+
+All path fields (`dbSnapshotsPath`, `envLocalPath`, `envPath`) are resolved **relative to the config file's directory** — no `__dirname` / `WORKSPACE_ROOT` math needed. Absolute paths are kept as-is.
+
+Run `pnpm db:local` to launch the interactive wizard. Pass flags (`--list`, `--load-last`, etc.) to skip it.
+
+## Type-safe env keys with t3-oss
+
+`buildLocalMongoEnv` returns a Zod schema slice alongside the mapper. Spread the slice into your `@t3-oss/env-*` setup and the same env keys validate at startup:
+
+```ts
+// env.ts
+import { createEnv } from "@t3-oss/env-nextjs";
+import { z } from "zod";
+
+import { localMongoEnv } from "../local-mongo-db.config";
+
+export const env = createEnv({
+  server: {
+    ...localMongoEnv.schema, // DATABASE_URL etc.
+    OTHER_SERVER_KEY: z.string(),
+  },
+  client: {
+    NEXT_PUBLIC_OTHER: z.string(),
+  },
+  // ...
+});
+```
+
+Single source of truth: the env-var names live in your `local-mongo-db.config.ts`, both the runtime injector and your env schema derive from the same builder call.
 
 ## Configuration reference
 
@@ -80,12 +89,12 @@ void run(
 | `containerName` | `"mongodb"` | Podman container name. |
 | `port` | `27017` | Local TCP port. Overridable at runtime with `--port`. |
 | `version` | `"6.0.13-ubi8"` | `mongodb-community-server` image tag. |
-| `localDbPath` | — | Directory for `.bson` snapshots and the `dump/` working dir. |
-| `envLocalPath` | — | Env file the CLI writes local-mode variables into (e.g. `.env.local`). |
-| `envPath` | — | Env file the CLI reads the hosted URI from (e.g. `.env`). |
-| `envVariables` | — | Static list or factory `(ctx) => list` of `{ envKey, value }` entries to write/strip. |
-| `localConnectionEnvKey` | `"DATABASE_URL"` | Key read from `envLocalPath` for the local URI (when pushing). |
-| `hostedConnectionEnvKey` | `"DATABASE_URL"` | Key read from `envPath` for the hosted Atlas URI. |
+| `dbSnapshotsPath` | — | Directory for `.bson` snapshots and the `dump/` working dir. Config-file-relative. |
+| `envLocalPath` | — | Env file the CLI writes local-mode variables into (e.g. `.env.local`). Config-file-relative. |
+| `envPath` | — | Env file the CLI reads the hosted Atlas URI from (e.g. `.env`). Config-file-relative. |
+| `envKeyMapper` | — | `{ dbUrl: string \| string[]; dbSource?: string \| string[] }`. Canonical → env-var-name map. |
+| `extraEnvVariables` | — | Optional `({ port }) => [{ envKey, value }]` for env vars outside the canonical mapper. |
+| `hostedDbUrlEnvKey` | `"DATABASE_URL"` | Key read from `envPath` for the hosted Atlas URI. |
 | `enablePushToHosted` | `false` | Reveal the `push` action and `--push` / `--push-current` flags. |
 | `enableHostedDbDuplication` | `false` | Reveal the `duplicate-hosted-db` action. |
 | `namespaceTransform` | — | `{ from, to }` forwarded as `--nsFrom` / `--nsTo` to `mongorestore`. |
@@ -93,6 +102,7 @@ void run(
 ## CLI flags
 
 ```
+--config <path>    Use a specific config file (overrides auto-discovery)
 --list             List all available snapshots
 --load-last        Load the most recent DB snapshot
 --load <slug>      Load a specific snapshot by slug
@@ -109,9 +119,7 @@ With no flags, an interactive wizard appears. `push` and `duplicate-hosted-db` c
 
 ## What "env injection" means
 
-While the local DB is running, the CLI **appends** your `envVariables` entries to `envLocalPath`. On Ctrl+C / SIGTERM it **strips** those same keys back out. The "local override" tricks your app into talking to the local container while leaving your hosted `envPath` untouched.
-
-Use different keys per project — `DATABASE_URL`, `DB_URI`, `DB_URL`, `MONGO_URL`, `NEXT_PUBLIC_DB_SOURCE` etc. — they're all just strings in your config.
+While the local DB is running, the CLI **appends** every mapper-derived env key (plus `extraEnvVariables`) to `envLocalPath`. Each `envKeyMapper.dbUrl` entry gets `mongodb://localhost:${port}`; each `envKeyMapper.dbSource` entry gets `"local"`. On Ctrl+C / SIGTERM it **strips** those same keys back out. The "local override" tricks your app into talking to the local container while leaving your hosted `envPath` untouched.
 
 ## License
 

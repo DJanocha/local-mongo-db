@@ -25,7 +25,7 @@ type RootAction =
   | "duplicate-hosted-db";
 
 const buildRootActions = (
-  config: ResolvedLocalMongoConfig<string>,
+  config: ResolvedLocalMongoConfig,
 ): RootAction[] => {
   const actions: RootAction[] = ["start", "pull", "save", "load"];
   if (config.enablePushToHosted) actions.push("push");
@@ -34,8 +34,7 @@ const buildRootActions = (
 };
 
 async function rootPrompt(
-  manager: LocalMongoManager,
-  config: ResolvedLocalMongoConfig<string>,
+  config: ResolvedLocalMongoConfig,
 ): Promise<RootAction> {
   const choices = buildRootActions(config);
 
@@ -281,10 +280,11 @@ async function handleUserChoice(
   }
 }
 
-export function buildCli<EnvKey extends string>(
-  config: LocalMongoConfig<EnvKey>,
+export function buildCli(
+  config: LocalMongoConfig,
+  configFilePath?: string,
 ): Command {
-  const resolved = resolveConfig(config);
+  const resolved = resolveConfig(config, configFilePath);
   const program = new Command();
 
   program
@@ -331,12 +331,12 @@ export function buildCli<EnvKey extends string>(
       process.exit(1);
     }
     // Apply port override into resolved config so the manager picks it up.
-    const finalConfig: ResolvedLocalMongoConfig<EnvKey> = {
+    const finalConfig: ResolvedLocalMongoConfig = {
       ...resolved,
       port,
     };
 
-    const manager = new LocalMongoManager<EnvKey>(finalConfig);
+    const manager = new LocalMongoManager(finalConfig);
 
     if (opts.list) {
       const snapshots = manager.list();
@@ -436,11 +436,8 @@ export function buildCli<EnvKey extends string>(
       process.exit(success ? 0 : 1);
     }
 
-    const action = await rootPrompt(
-      manager as LocalMongoManager,
-      finalConfig as ResolvedLocalMongoConfig<string>,
-    );
-    await handleUserChoice(action, manager as LocalMongoManager);
+    const action = await rootPrompt(finalConfig);
+    await handleUserChoice(action, manager);
   });
 
   return program;

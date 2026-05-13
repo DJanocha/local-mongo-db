@@ -13,16 +13,16 @@ import {
 const makeManager = (params: {
   envPath: string;
   envLocalPath: string;
-  localDbPath: string;
+  dbSnapshotsPath: string;
   enablePushToHosted?: boolean;
 }) =>
   new LocalMongoManager(
     resolveConfig({
       envPath: params.envPath,
       envLocalPath: params.envLocalPath,
-      localDbPath: params.localDbPath,
+      dbSnapshotsPath: params.dbSnapshotsPath,
       enablePushToHosted: params.enablePushToHosted,
-      envVariables: [{ envKey: "DATABASE_URL", value: "mongodb://localhost" }],
+      envKeyMapper: { dbUrl: "DATABASE_URL" },
     }),
     { registerSignalHandlers: false },
   );
@@ -31,13 +31,13 @@ describe("push safety gates", () => {
   let tmpDir: string;
   let envPath: string;
   let envLocalPath: string;
-  let localDbPath: string;
+  let dbSnapshotsPath: string;
 
   beforeEach(() => {
     tmpDir = createTempDir("safety");
     envPath = path.join(tmpDir, ".env");
     envLocalPath = path.join(tmpDir, ".env.local");
-    localDbPath = path.join(tmpDir, "localDb");
+    dbSnapshotsPath = path.join(tmpDir, "localDb");
   });
 
   afterEach(() => {
@@ -55,7 +55,7 @@ describe("push safety gates", () => {
       const manager = makeManager({
         envPath,
         envLocalPath,
-        localDbPath,
+        dbSnapshotsPath,
         enablePushToHosted: false,
       });
       const result = manager.isPushBlocked();
@@ -73,7 +73,7 @@ describe("push safety gates", () => {
       const manager = makeManager({
         envPath,
         envLocalPath,
-        localDbPath,
+        dbSnapshotsPath,
         enablePushToHosted: true,
       });
       expect(manager.isPushBlocked().blocked).toBe(false);
@@ -86,7 +86,7 @@ describe("push safety gates", () => {
       const manager = makeManager({
         envPath,
         envLocalPath,
-        localDbPath,
+        dbSnapshotsPath,
         enablePushToHosted: false,
       });
       expect(manager.isPushBlocked().blocked).toBe(false);
@@ -99,7 +99,7 @@ describe("push safety gates", () => {
       const manager = makeManager({
         envPath,
         envLocalPath,
-        localDbPath,
+        dbSnapshotsPath,
         enablePushToHosted: false,
       });
       expect(manager.isPushBlocked().blocked).toBe(false);
@@ -114,7 +114,7 @@ describe("push safety gates", () => {
           value: "mongodb+srv://user:pw@cluster.mongodb.net/db",
         },
       ]);
-      const manager = makeManager({ envPath, envLocalPath, localDbPath });
+      const manager = makeManager({ envPath, envLocalPath, dbSnapshotsPath });
       expect(manager.isTargetHosted()).toBe(true);
     });
 
@@ -122,7 +122,7 @@ describe("push safety gates", () => {
       writeEnvFile(envPath, [
         { envKey: "DATABASE_URL", value: "mongodb://localhost:27017/db" },
       ]);
-      const manager = makeManager({ envPath, envLocalPath, localDbPath });
+      const manager = makeManager({ envPath, envLocalPath, dbSnapshotsPath });
       expect(manager.isTargetHosted()).toBe(false);
     });
 
@@ -130,7 +130,7 @@ describe("push safety gates", () => {
       writeEnvFile(envPath, [
         { envKey: "DATABASE_URL", value: "mongodb://127.0.0.1:27017/db" },
       ]);
-      const manager = makeManager({ envPath, envLocalPath, localDbPath });
+      const manager = makeManager({ envPath, envLocalPath, dbSnapshotsPath });
       expect(manager.isTargetHosted()).toBe(false);
     });
   });
@@ -143,7 +143,7 @@ describe("push safety gates", () => {
           value: "mongodb+srv://user:supersecret@cluster.mongodb.net/db",
         },
       ]);
-      const manager = makeManager({ envPath, envLocalPath, localDbPath });
+      const manager = makeManager({ envPath, envLocalPath, dbSnapshotsPath });
       const masked = manager.getMaskedConnectionString();
       expect(masked).toContain("cluster.mongodb.net");
       expect(masked).not.toContain("supersecret");

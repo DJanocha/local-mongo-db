@@ -1,25 +1,17 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { buildLocalMongoEnv, defineConfig } from "../src/index";
 
-import { defineConfig, run } from "../src/index";
+export const localMongoEnv = buildLocalMongoEnv({
+  dbUrl: "DATABASE_URL",
+  dbSource: "DB_SOURCE",
+});
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SMOKE_ROOT = path.join(__dirname, "..", ".smoke");
-
-type SmokeEnvKey = "DATABASE_URL" | "DB_SOURCE";
-
-void run(
-  defineConfig<SmokeEnvKey>({
-    containerName: "mongodb-smoke",
-    port: 27099,
-    localDbPath: path.join(SMOKE_ROOT, "localDb"),
-    envLocalPath: path.join(SMOKE_ROOT, ".env.local"),
-    envPath: path.join(SMOKE_ROOT, ".env"),
-    envVariables: ({ port }) => [
-      { envKey: "DATABASE_URL", value: `mongodb://localhost:${port}` },
-      { envKey: "DB_SOURCE", value: "local" },
-    ],
-    enablePushToHosted: false,
-    enableHostedDbDuplication: false,
-  }),
-);
+export default defineConfig({
+  containerName: "mongodb-smoke",
+  port: 27099,
+  dbSnapshotsPath: "../.smoke/localDb",
+  envLocalPath: "../.smoke/.env.local",
+  envPath: "../.smoke/.env",
+  envKeyMapper: localMongoEnv.envKeyMapper,
+  enablePushToHosted: false,
+  enableHostedDbDuplication: false,
+});
