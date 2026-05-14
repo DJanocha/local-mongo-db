@@ -26,14 +26,41 @@ export type BuildLocalMongoEnvResult = {
   envKeyMapper: LocalMongoEnvKeyMapper;
 };
 
+type KeyTuple<T extends EnvKeyOrKeys | undefined> = T extends string
+  ? readonly [T]
+  : T extends readonly string[]
+    ? T
+    : readonly [];
+
+type KeyUnion<T extends EnvKeyOrKeys | undefined> = KeyTuple<T>[number];
+
+export type BuildLocalMongoEnvResultFor<
+  TDbUrl extends EnvKeyOrKeys,
+  TDbSource extends EnvKeyOrKeys | undefined,
+> = {
+  /**
+   * Flat Zod schema slice — spread into `createEnv({ server, client })`
+   * wherever each key belongs.
+   */
+  schema: Record<KeyUnion<TDbUrl> | KeyUnion<TDbSource>, z.ZodTypeAny>;
+  /** Mapper passed to `defineConfig({ envKeyMapper })`. */
+  envKeyMapper: {
+    dbUrl: KeyTuple<TDbUrl>;
+    dbSource: KeyTuple<TDbSource>;
+  };
+};
+
 const toArray = (value: EnvKeyOrKeys | undefined): string[] => {
   if (value === undefined) return [];
   return typeof value === "string" ? [value] : [...value];
 };
 
-export const buildLocalMongoEnv = (
-  input: BuildLocalMongoEnvInput,
-): BuildLocalMongoEnvResult => {
+export const buildLocalMongoEnv = <
+  const TDbUrl extends EnvKeyOrKeys,
+  const TDbSource extends EnvKeyOrKeys | undefined = undefined,
+>(
+  input: { dbUrl: TDbUrl; dbSource?: TDbSource },
+): BuildLocalMongoEnvResultFor<TDbUrl, TDbSource> => {
   const dbUrlKeys = toArray(input.dbUrl);
   const dbSourceKeys = toArray(input.dbSource);
 
@@ -75,5 +102,5 @@ export const buildLocalMongoEnv = (
       dbUrl: dbUrlKeys,
       dbSource: dbSourceKeys,
     },
-  };
+  } as unknown as BuildLocalMongoEnvResultFor<TDbUrl, TDbSource>;
 };

@@ -1,6 +1,6 @@
 {
   "name": "@danieljanocha/local-mongo-db",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Reusable CLI for managing a local MongoDB container (podman) with snapshots, pull/push to a hosted Atlas, and configurable env-var injection.",
   "license": "MIT",
   "author": "Daniel Janocha",

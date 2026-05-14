@@ -9,6 +9,7 @@ export { buildLocalMongoEnv } from "./build-local-mongo-env";
 export type {
   BuildLocalMongoEnvInput,
   BuildLocalMongoEnvResult,
+  BuildLocalMongoEnvResultFor,
   EnvKeyOrKeys,
   LocalMongoEnvKeyMapper,
   LocalMongoEnvSchema,
