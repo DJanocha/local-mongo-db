@@ -110,17 +110,30 @@ export class LocalMongoManager {
     }
   }
 
-  private async waitForMongoDB(): Promise<void> {
-    for (;;) {
+  private async waitForMongoDB(
+    proc: ReturnType<typeof spawn>,
+  ): Promise<void> {
+    const maxAttempts = 60;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (proc.exitCode !== null) {
+        throw new Error(
+          `MongoDB container "${this.config.containerName}" exited (code ${proc.exitCode}) before becoming ready. ` +
+            `Run \`podman logs ${this.config.containerName}\` for details — a common cause is another container already holding its data volume.`,
+        );
+      }
       try {
         execSync(
           `podman exec ${this.config.containerName} mongosh --eval "db.runCommand('ping').ok"`,
+          { stdio: "ignore" },
         );
         return;
       } catch {
         await delay(1000);
       }
     }
+    throw new Error(
+      `MongoDB container "${this.config.containerName}" did not become ready within ${maxAttempts}s.`,
+    );
   }
 
   private async ensureContainerStopped(): Promise<void> {
@@ -388,7 +401,7 @@ export class LocalMongoManager {
     }
 
     log.info("Starting MongoDB container...");
-    this.mongoProcess = spawn(
+    const mongoProcess = spawn(
       "podman",
       [
         "run",
@@ -398,7 +411,7 @@ export class LocalMongoManager {
         "-p",
         `${this.config.port}:27017`,
         "-v",
-        "mongodb_data:/data/db",
+        `${this.config.containerName}_data:/data/db`,
         "--stop-timeout",
         "30",
         "--init",
@@ -420,14 +433,15 @@ export class LocalMongoManager {
         detached: false,
       },
     );
+    this.mongoProcess = mongoProcess;
 
-    this.mongoProcess.on("error", () => {
+    mongoProcess.on("error", () => {
       log.error("MongoDB container process error");
       void this.cleanup();
     });
 
     log.info("Waiting for MongoDB to be ready...");
-    await this.waitForMongoDB();
+    await this.waitForMongoDB(mongoProcess);
     log.success("MongoDB is ready!");
 
     mightFailSync(() =>
