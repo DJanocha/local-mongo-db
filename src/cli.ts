@@ -11,6 +11,7 @@ import {
 } from "./define-config";
 import { LocalMongoManager } from "./manager";
 import { colors } from "./utils/colors";
+import { log } from "./utils/log";
 
 const loadActionSchema = z.object({ snapshot: z.string() });
 const saveActionSchema = z.object({ saveName: z.string() });
@@ -31,6 +32,14 @@ const buildRootActions = (
   if (config.enablePushToHosted) actions.push("push");
   if (config.enableHostedDbDuplication) actions.push("duplicate-hosted-db");
   return actions;
+};
+
+const dangerBanner = (lines: string[]): void => {
+  console.log("\n" + colors.orange("═".repeat(60)));
+  console.log(colors.orange("⚠️  WARNING: DANGEROUS OPERATION ⚠️"));
+  console.log(colors.orange("═".repeat(60)));
+  for (const line of lines) console.log(line);
+  console.log("\n" + colors.orange("═".repeat(60)));
 };
 
 async function rootPrompt(
@@ -62,19 +71,19 @@ async function rootPrompt(
         switch (choice) {
           case "load":
             return {
-              name: `${choice} (from local snapshot)`,
+              name: `${choice} ${colors.gray("(from local snapshot)")}`,
               value: choice,
               disabled: false,
             };
           case "save":
             return {
-              name: `${choice} (to local snapshot)`,
+              name: `${choice} ${colors.gray("(to local snapshot)")}`,
               value: choice,
               disabled: false,
             };
           case "pull":
             return {
-              name: `${choice} (from hosted environment)`,
+              name: `${choice} ${colors.gray("(from hosted environment)")}`,
               value: choice,
               disabled: false,
             };
@@ -88,7 +97,7 @@ async function rootPrompt(
             };
           case "duplicate-hosted-db":
             return {
-              name: "duplicate hosted db (create copy of hosted database)",
+              name: `duplicate hosted db ${colors.gray("(create copy of hosted database)")}`,
               value: choice,
               disabled: false,
             };
@@ -112,11 +121,11 @@ async function handleUserChoice(
 ): Promise<void> {
   switch (action) {
     case "start":
-      console.log("Starting with clean DB...");
+      log.info("Starting with clean DB...");
       await manager.start();
       break;
     case "pull":
-      console.log("Pulling from hosted environment...");
+      log.info("Pulling from hosted environment...");
       manager.pull();
       break;
     case "push": {
@@ -147,7 +156,7 @@ async function handleUserChoice(
       if (sourceResult.pushSource === "snapshot") {
         const savedFiles = manager.list();
         if (savedFiles.length === 0) {
-          console.log("No saved snapshots available.");
+          log.warn("No saved snapshots available.");
           return;
         }
 
@@ -170,21 +179,15 @@ async function handleUserChoice(
           ? "current local database"
           : `snapshot "${snapshotToUse}"`;
 
-      console.log("\n" + colors.orange("═".repeat(60)));
-      console.log(colors.orange("⚠️  WARNING: DANGEROUS OPERATION ⚠️"));
-      console.log(colors.orange("═".repeat(60)));
-      console.log(
+      dangerBanner([
         colors.brightRed(`\nYou are about to OVERRIDE the hosted database!`),
-      );
-      console.log(colors.yellow(`\n  Target: ${maskedUri}`));
-      console.log(colors.yellow(`  Source: ${sourceDisplay}`));
-      console.log(
+        colors.yellow(`\n  Target: ${maskedUri}`),
+        colors.yellow(`  Source: ${sourceDisplay}`),
         colors.brightRed(
           `\nThis will PERMANENTLY DELETE all data in the hosted database`,
         ),
-      );
-      console.log(colors.brightRed(`and replace it with the ${sourceDisplay}.`));
-      console.log("\n" + colors.orange("═".repeat(60)));
+        colors.brightRed(`and replace it with the ${sourceDisplay}.`),
+      ]);
 
       const { confirmation } = pushConfirmationSchema.parse(
         await inquirer.prompt([
@@ -199,18 +202,18 @@ async function handleUserChoice(
       );
 
       if (confirmation !== "i am certain") {
-        console.log("\nOperation cancelled. No changes were made.");
+        log.warn("\nOperation cancelled. No changes were made.");
         return;
       }
 
-      console.log("\nProceeding with push...\n");
+      log.info("\nProceeding with push...\n");
       manager.push(snapshotToUse);
       break;
     }
     case "load": {
       const savedFiles = manager.list();
       if (savedFiles.length === 0) {
-        console.log("No saved snapshots available.");
+        log.warn("No saved snapshots available.");
         return;
       }
       const { snapshot } = loadActionSchema.parse(
@@ -227,7 +230,7 @@ async function handleUserChoice(
       break;
     }
     case "save": {
-      console.log("Saving current state...");
+      log.info("Saving current state...");
       const { saveName } = saveActionSchema.parse(
         await inquirer.prompt([
           {
@@ -238,7 +241,7 @@ async function handleUserChoice(
         ]),
       );
       if (!saveName) {
-        console.log("Skipping save...");
+        log.step("Skipping save...");
         return;
       }
       manager.save(saveName);
@@ -247,7 +250,7 @@ async function handleUserChoice(
     case "duplicate-hosted-db": {
       const databases = await manager.listHostedDatabases();
       if (databases.length === 0) {
-        console.log("No databases found or unable to list databases.");
+        log.warn("No databases found or unable to list databases.");
         return;
       }
       const baseDbResult = await inquirer.prompt<{ baseDbName: string }>([
@@ -271,7 +274,7 @@ async function handleUserChoice(
       ]);
       const copiedDbName = newDbResult.copiedDbName.trim();
       if (!copiedDbName) {
-        console.log("Operation cancelled - empty database name provided");
+        log.warn("Operation cancelled - empty database name provided");
         process.exit(0);
       }
       await manager.duplicateHostedDb(baseDbResult.baseDbName, copiedDbName);
@@ -325,7 +328,7 @@ export function buildCli(
 
     const port = parseInt(opts.port, 10);
     if (isNaN(port) || port < 1 || port > 65535) {
-      console.error(
+      log.error(
         `Invalid port: ${opts.port}. Must be a number between 1 and 65535.`,
       );
       process.exit(1);
@@ -341,16 +344,16 @@ export function buildCli(
     if (opts.list) {
       const snapshots = manager.list();
       if (snapshots.length === 0) {
-        console.log("No snapshots available.");
+        log.warn("No snapshots available.");
       } else {
-        console.log("Available snapshots:");
-        snapshots.forEach((s) => console.log(`  ${s}`));
+        log.info("Available snapshots:");
+        snapshots.forEach((s) => log.plain(`  ${s}`));
       }
       process.exit(0);
     }
 
     if (opts.start) {
-      console.log("Starting local MongoDB...");
+      log.info("Starting local MongoDB...");
       await manager.start();
       return;
     }
@@ -368,14 +371,14 @@ export function buildCli(
     if (opts.loadLast) {
       const savedFiles = manager.list();
       if (savedFiles.length === 0) {
-        console.log(
+        log.warn(
           "No saved DB snapshots found. Please create a snapshot first.",
         );
         process.exit(1);
       }
       const latestSnapshot = savedFiles[savedFiles.length - 1];
       if (!latestSnapshot) {
-        console.log("No valid snapshot found to load.");
+        log.warn("No valid snapshot found to load.");
         process.exit(1);
       }
       const success = manager.load(latestSnapshot);
@@ -395,21 +398,15 @@ export function buildCli(
           : `snapshot "${source}"`;
       const maskedUri = manager.getMaskedConnectionString();
 
-      console.log("\n" + colors.orange("═".repeat(60)));
-      console.log(colors.orange("⚠️  WARNING: DANGEROUS OPERATION ⚠️"));
-      console.log(colors.orange("═".repeat(60)));
-      console.log(
+      dangerBanner([
         colors.brightRed(`\nYou are about to OVERRIDE the hosted database!`),
-      );
-      console.log(colors.yellow(`\n  Target: ${maskedUri}`));
-      console.log(colors.yellow(`  Source: ${sourceDisplay}`));
-      console.log(
+        colors.yellow(`\n  Target: ${maskedUri}`),
+        colors.yellow(`  Source: ${sourceDisplay}`),
         colors.brightRed(
           `\nThis will PERMANENTLY DELETE all data in the hosted database`,
         ),
-      );
-      console.log(colors.brightRed(`and replace it with the ${sourceDisplay}.`));
-      console.log("\n" + colors.orange("═".repeat(60)));
+        colors.brightRed(`and replace it with the ${sourceDisplay}.`),
+      ]);
 
       const rl = await import("node:readline");
       const readline = rl.createInterface({
@@ -427,11 +424,11 @@ export function buildCli(
       readline.close();
 
       if (answer !== "i am certain") {
-        console.log("\nOperation cancelled. No changes were made.");
+        log.warn("\nOperation cancelled. No changes were made.");
         process.exit(0);
       }
 
-      console.log("\nProceeding with push...\n");
+      log.info("\nProceeding with push...\n");
       const success = manager.push(source);
       process.exit(success ? 0 : 1);
     }

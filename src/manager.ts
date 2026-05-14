@@ -3,7 +3,6 @@ import fs from "node:fs";
 import path from "node:path";
 
 import { format } from "date-fns";
-import _ from "lodash";
 import { MongoClient } from "mongodb";
 
 import type {
@@ -13,6 +12,7 @@ import type {
 import { appendEnvVars, readEnvKey, removeEnvKeys } from "./env-file";
 import { delay } from "./utils/async";
 import { colors } from "./utils/colors";
+import { banner, log } from "./utils/log";
 import { mightFailSync } from "./utils/sync";
 
 const dbSaveSeparator = "__";
@@ -67,12 +67,12 @@ export class LocalMongoManager {
 
     const handleSignal = async (signal: string) => {
       if (cleanupInProgress) {
-        console.log("Cleanup already in progress, waiting...");
+        log.step("Cleanup already in progress, waiting...");
         return;
       }
       cleanupInProgress = true;
 
-      console.log(`\nReceived ${signal}, starting graceful shutdown...`);
+      log.info(`\nReceived ${signal}, starting graceful shutdown...`);
 
       try {
         await this.cleanup();
@@ -92,11 +92,11 @@ export class LocalMongoManager {
       void handleSignal("SIGHUP");
     });
     process.on("uncaughtException", (error) => {
-      console.error("\nUncaught Exception:", error);
+      log.error("\nUncaught Exception:", error);
       void handleSignal("UNCAUGHT_EXCEPTION");
     });
     process.on("unhandledRejection", (error) => {
-      console.error("\nUnhandled Rejection:", error);
+      log.error("\nUnhandled Rejection:", error);
       void handleSignal("UNHANDLED_REJECTION");
     });
   }
@@ -134,13 +134,13 @@ export class LocalMongoManager {
     }
 
     try {
-      console.log("Checking for rootless-cni-infra container...");
+      log.step("Checking for rootless-cni-infra container...");
       execSync(`podman container exists rootless-cni-infra`, {
         stdio: "ignore",
       });
-      console.log("Removing rootless-cni-infra container...");
+      log.step("Removing rootless-cni-infra container...");
       execSync(`podman rm -f rootless-cni-infra`, { stdio: "ignore" });
-      console.log("rootless-cni-infra container removed");
+      log.step("rootless-cni-infra container removed");
     } catch {
       // not present
     }
@@ -149,50 +149,50 @@ export class LocalMongoManager {
       execSync(`podman container exists ${this.config.containerName}`, {
         stdio: "ignore",
       });
-      console.log("Existing MongoDB container found, removing it...");
+      log.step("Existing MongoDB container found, removing it...");
       execSync(`podman rm -f ${this.config.containerName}`, {
         stdio: "ignore",
       });
-      console.log("Container removed successfully");
+      log.step("Container removed successfully");
     } catch {
       // not present
     }
   }
 
   private ensurePortFreed() {
-    console.log("Ensuring port is freed...");
+    log.step("Ensuring port is freed...");
     const { port } = this.config;
     try {
       execSync(`lsof -i :${port}`, { stdio: "ignore" });
-      console.log(`Port ${port} is still in use, attempting to free it`);
+      log.warn(`Port ${port} is still in use, attempting to free it`);
 
       try {
         execSync(`lsof -ti :${port} | xargs kill -9`, { stdio: "ignore" });
-        console.log("Killed process using port");
+        log.step("Killed process using port");
       } catch {
-        console.log("No process to kill");
+        log.step("No process to kill");
       }
 
       try {
         execSync(`podman port rm ${port}`, { stdio: "inherit" });
-        console.log("Port mapping removed");
+        log.step("Port mapping removed");
       } catch {
-        console.log("No podman port mapping found");
+        log.step("No podman port mapping found");
       }
 
       try {
         execSync(`lsof -i :${port}`, { stdio: "ignore" });
-        console.error(`Warning: Port ${port} is still in use after cleanup`);
+        log.warn(`Warning: Port ${port} is still in use after cleanup`);
       } catch {
-        console.log(`Port ${port} is now free`);
+        log.step(`Port ${port} is now free`);
       }
     } catch {
-      console.log(`Port ${port} is already free`);
+      log.step(`Port ${port} is already free`);
     }
   }
 
   private writeDbToBsonFile({ filePath }: { filePath: string }): boolean {
-    console.log("Writing database to BSON file:", filePath);
+    log.step(`Writing database to BSON file: ${filePath}`);
     try {
       execSync(
         `mongodump --uri="mongodb://localhost:${this.config.port}" --archive="${filePath}" --quiet`,
@@ -200,7 +200,7 @@ export class LocalMongoManager {
       );
       return true;
     } catch (error) {
-      console.error(
+      log.error(
         "Failed to write database to BSON file:",
         (error as Error).message,
       );
@@ -249,7 +249,7 @@ export class LocalMongoManager {
       );
       return true;
     } catch (error) {
-      console.error(
+      log.error(
         "Failed to load database from BSON file:",
         (error as Error).message,
       );
@@ -259,28 +259,28 @@ export class LocalMongoManager {
 
   private async cleanup() {
     if (this.isCleanupRunning) {
-      console.log("Cleanup already in progress, skipping duplicate cleanup");
+      log.step("Cleanup already in progress, skipping duplicate cleanup");
       return;
     }
     this.isCleanupRunning = true;
 
     if (fs.existsSync(this.config.envLocalPath)) {
-      console.log("Removing local database configuration...");
+      log.step("Removing local database configuration...");
       removeEnvKeys(
         this.config.envLocalPath,
         this.resolveEnvVariables().map((v) => v.envKey),
       );
-      console.log("Local database configuration removed");
+      log.step("Local database configuration removed");
     }
 
     try {
-      console.log("\nStarting cleanup process...");
+      log.info("\nStarting cleanup process...");
       await this.ensureContainerStopped();
       this.ensurePortFreed();
-      console.log("Cleanup completed successfully");
-      console.log("Switched back to hosted database");
+      log.success("Cleanup completed successfully");
+      log.success("Switched back to hosted database");
     } catch (error) {
-      console.error("Error during cleanup:", (error as Error).message);
+      log.error("Error during cleanup:", (error as Error).message);
     } finally {
       this.isCleanupRunning = false;
       this.mongoProcess = null;
@@ -305,7 +305,7 @@ export class LocalMongoManager {
       await client.close();
       return databases;
     } catch (error) {
-      console.error("Error listing databases:", (error as Error).message);
+      log.error("Error listing databases:", (error as Error).message);
       return [];
     }
   }
@@ -329,23 +329,25 @@ export class LocalMongoManager {
         fs.mkdirSync(backupPath, { recursive: true });
       }
 
-      console.log(`Dumping database ${baseDbName}...`);
+      log.step(`Dumping database ${baseDbName}...`);
       execSync(
         `mongodump --uri="${this.hostedAtlasUri}" --db ${baseDbName} --out "${backupPath}"`,
       );
 
-      console.log(`Restoring to new database ${copiedDbName}...`);
+      log.step(`Restoring to new database ${copiedDbName}...`);
       execSync(
         `mongorestore --uri="${this.hostedAtlasUri}" --db ${copiedDbName} "${backupPath}/${baseDbName}" --drop${this.nsArgs()}`,
       );
 
-      console.log("Cleaning up temporary files...");
+      log.step("Cleaning up temporary files...");
       execSync(`rm -rf "${backupPath}"`);
 
-      console.log(`Successfully duplicated ${baseDbName} to ${copiedDbName}!`);
+      log.success(
+        `Successfully duplicated ${baseDbName} to ${copiedDbName}!`,
+      );
       return true;
     } catch (error) {
-      console.error("Error:", (error as Error).message);
+      log.error("Error:", (error as Error).message);
       return false;
     }
   }
@@ -358,34 +360,34 @@ export class LocalMongoManager {
 
   async start() {
     if (!this.isPodmanRunning()) {
-      console.log("Starting podman machine...");
+      log.step("Starting podman machine...");
       execSync("podman machine start", { stdio: "ignore" });
     }
 
     await this.ensureContainerStopped();
 
-    console.log(`Checking MongoDB image (version: ${this.config.version})...`);
+    log.step(`Checking MongoDB image (version: ${this.config.version})...`);
     try {
       execSync(
         `podman image exists docker.io/mongodb/mongodb-community-server:${this.config.version}`,
         { stdio: "ignore" },
       );
-      console.log("MongoDB image already exists locally");
+      log.step("MongoDB image already exists locally");
     } catch {
-      console.log("MongoDB image not found locally, pulling...");
+      log.step("MongoDB image not found locally, pulling...");
       try {
         execSync(
           `podman pull docker.io/mongodb/mongodb-community-server:${this.config.version}`,
           { stdio: "ignore" },
         );
-        console.log("MongoDB image pulled successfully");
+        log.step("MongoDB image pulled successfully");
       } catch (error) {
-        console.error("Failed to pull MongoDB image:", error);
+        log.error("Failed to pull MongoDB image:", error);
         process.exit(1);
       }
     }
 
-    console.log("Starting MongoDB container...");
+    log.info("Starting MongoDB container...");
     this.mongoProcess = spawn(
       "podman",
       [
@@ -420,30 +422,31 @@ export class LocalMongoManager {
     );
 
     this.mongoProcess.on("error", () => {
-      console.log("ON ERROR HAPPENED");
+      log.error("MongoDB container process error");
       void this.cleanup();
     });
 
-    console.log("Waiting for MongoDB to be ready...");
+    log.info("Waiting for MongoDB to be ready...");
     await this.waitForMongoDB();
-    console.log("MongoDB is ready!");
+    log.success("MongoDB is ready!");
 
     mightFailSync(() =>
       appendEnvVars(this.config.envLocalPath, this.resolveEnvVariables()),
     );
 
-    console.log("\n===================================");
-    console.log("Local MongoDB is running!");
-    console.log(`Connection string: mongodb://localhost:${this.config.port}`);
-    console.log(
-      "Use Ctrl+C to stop the database and switch back to the hosted DB",
+    banner(
+      [
+        "Local MongoDB is running!",
+        `Connection string: mongodb://localhost:${this.config.port}`,
+        "Use Ctrl+C to stop the database and switch back to the hosted DB",
+      ],
+      colors.green,
     );
-    console.log("===================================\n");
 
     await new Promise<void>((resolve) =>
       this.mongoProcess!.on("close", (code) => {
         if (code !== 0) {
-          console.log("\nMongoDB container stopped");
+          log.warn("\nMongoDB container stopped");
         }
         void this.cleanup().then(() => resolve());
       }),
@@ -454,21 +457,21 @@ export class LocalMongoManager {
     try {
       const atlasUrl = this.getHostedAtlasUri();
 
-      console.log(
+      log.info(
         `Pulling data from hosted MongoDB connection string: ${this.maskConnectionString(atlasUrl)}...`,
       );
       execSync(`mongodump --uri=${atlasUrl} --out="${this.dumpPath}"`);
       execSync(
         `mongorestore --uri="mongodb://localhost:${this.config.port}" "${this.dumpPath}" --drop${this.nsArgs()}`,
       );
-      console.log("Data pulled successfully!");
+      log.success("Data pulled successfully!");
 
-      console.log("Cleaning up temporary dump data...");
+      log.step("Cleaning up temporary dump data...");
       execSync(`rm -rf "${this.dumpPath}"/*`);
-      console.log("Cleanup complete!");
+      log.success("Cleanup complete!");
       return true;
     } catch (error) {
-      console.error("Error:", (error as Error).message);
+      log.error("Error:", (error as Error).message);
       return false;
     }
   }
@@ -489,23 +492,23 @@ export class LocalMongoManager {
 
       if (source === "current") {
         const localDbUri = this.getLocalDbUri();
-        console.log("Pushing current local database state to hosted MongoDB...");
-        console.log(
+        log.info("Pushing current local database state to hosted MongoDB...");
+        log.step(
           `  Source (from ${path.basename(this.config.envLocalPath)}): ${this.maskConnectionString(localDbUri)}`,
         );
-        console.log(
+        log.step(
           `  Target (from ${path.basename(this.config.envPath)}): ${this.maskConnectionString(atlasUrl)}`,
         );
 
         const tempArchive = path.join(this.dumpPath, "_temp_push.bson");
 
-        console.log("\nCreating temporary archive from local database...");
+        log.step("\nCreating temporary archive from local database...");
         execSync(
           `mongodump --uri="${localDbUri}" --archive="${tempArchive}" --quiet`,
           { stdio: "ignore" },
         );
 
-        console.log("Restoring to hosted MongoDB...");
+        log.step("Restoring to hosted MongoDB...");
         execSync(
           `mongorestore --uri="${atlasUrl}" --archive="${tempArchive}" --drop`,
           { stdio: "inherit" },
@@ -513,7 +516,7 @@ export class LocalMongoManager {
 
         fs.unlinkSync(tempArchive);
 
-        console.log("Successfully pushed local database to hosted MongoDB!");
+        log.success("Successfully pushed local database to hosted MongoDB!");
         return true;
       } else {
         const loadPath = path.join(
@@ -522,24 +525,24 @@ export class LocalMongoManager {
         );
 
         if (!fs.existsSync(loadPath)) {
-          console.error(`Error: Snapshot "${source}" does not exist`);
+          log.error(`Error: Snapshot "${source}" does not exist`);
           return false;
         }
 
-        console.log(`Pushing snapshot "${source}" to hosted MongoDB...`);
+        log.info(`Pushing snapshot "${source}" to hosted MongoDB...`);
 
         execSync(
           `mongorestore --uri="${atlasUrl}" --archive="${loadPath}" --drop`,
           { stdio: "inherit" },
         );
 
-        console.log(
+        log.success(
           `Successfully pushed snapshot "${source}" to hosted MongoDB!`,
         );
         return true;
       }
     } catch (error) {
-      console.error(
+      log.error(
         "Failed to push to hosted MongoDB:",
         (error as Error).message,
       );
@@ -605,9 +608,9 @@ export class LocalMongoManager {
       `${slug}.bson`,
     );
 
-    console.log(`Saving current database state...`);
+    log.info("Saving current database state...");
     if (this.writeDbToBsonFile({ filePath: savePath })) {
-      console.log(`Snapshot saved: "${slug}"`);
+      log.success(`Snapshot saved: "${slug}"`);
       return slug;
     }
     return null;
@@ -617,20 +620,20 @@ export class LocalMongoManager {
     const loadPath = path.join(this.config.dbSnapshotsPath, `${slug}.bson`);
 
     if (!fs.existsSync(loadPath)) {
-      console.error(`Error: Snapshot "${slug}" does not exist`);
-      console.log("\nAvailable snapshots:");
+      log.error(`Error: Snapshot "${slug}" does not exist`);
+      log.info("\nAvailable snapshots:");
       const available = this.list();
       if (available.length === 0) {
-        console.log("  (none)");
+        log.step("  (none)");
       } else {
-        available.forEach((s) => console.log(`  - ${s}`));
+        available.forEach((s) => log.plain(`  - ${s}`));
       }
       return false;
     }
 
-    console.log(`Loading snapshot: "${slug}"...`);
+    log.info(`Loading snapshot: "${slug}"...`);
     if (this.loadDbFromBsonFile({ filePath: loadPath })) {
-      console.log("Database state loaded successfully!");
+      log.success("Database state loaded successfully!");
       return true;
     }
     return false;
