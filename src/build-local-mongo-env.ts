@@ -29,8 +29,8 @@ export type BuildLocalMongoEnvResult = {
 type KeyTuple<T extends EnvKeyOrKeys | undefined> = T extends string
   ? readonly [T]
   : T extends readonly string[]
-    ? T
-    : readonly [];
+  ? T
+  : readonly [];
 
 type KeyUnion<T extends EnvKeyOrKeys | undefined> = KeyTuple<T>[number];
 
@@ -38,7 +38,9 @@ type EnvShape<
   TDbUrl extends EnvKeyOrKeys,
   TDbSource extends EnvKeyOrKeys | undefined,
 > = { [K in KeyUnion<TDbUrl>]: z.ZodString } & {
-  [K in KeyUnion<TDbSource>]: z.ZodOptional<z.ZodEnum<["local", "hosted"]>>;
+  [K in KeyUnion<TDbSource>]: z.ZodOptional<
+    z.ZodEnum<{ local: "local"; hosted: "hosted" }>
+  >;
 };
 
 export type BuildLocalMongoEnvResultFor<
@@ -95,9 +97,9 @@ export const buildLocalMongoEnv = <
     seen.set(key, "dbSource");
   }
 
-  const shape: z.ZodRawShape = {};
+  const shape: Record<string, z.ZodType> = {};
   for (const key of dbUrlKeys) {
-    shape[key] = z.string().url();
+    shape[key] = z.url();
   }
   for (const key of dbSourceKeys) {
     shape[key] = z.enum(["local", "hosted"]).optional();
