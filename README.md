@@ -59,7 +59,7 @@ Run `pnpm db:local` to launch the interactive wizard. Pass flags (`--list`, `--l
 
 ## Type-safe env keys with t3-oss
 
-`buildLocalMongoEnv` returns a Zod schema slice alongside the mapper. Spread the slice into your `@t3-oss/env-*` setup and the same env keys validate at startup:
+`buildLocalMongoEnv` returns a Zod object schema alongside the mapper. Spread its `.shape` into your `@t3-oss/env-*` setup and the same env keys validate at startup:
 
 ```ts
 // env.ts
@@ -70,7 +70,7 @@ import { localMongoEnv } from "../local-mongo-db.config";
 
 export const env = createEnv({
   server: {
-    ...localMongoEnv.schema, // DATABASE_URL etc.
+    ...localMongoEnv.schema.shape, // DATABASE_URL etc.
     OTHER_SERVER_KEY: z.string(),
   },
   client: {

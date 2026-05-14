@@ -37,18 +37,18 @@ describe("buildLocalMongoEnv", () => {
       dbUrl: "DATABASE_URL",
       dbSource: "DB_SOURCE",
     });
-    expect(Object.keys(result.schema).sort()).toEqual([
+    expect(Object.keys(result.schema.shape).sort()).toEqual([
       "DATABASE_URL",
       "DB_SOURCE",
     ]);
     // dbUrl schema accepts a real URL, rejects garbage.
-    const dbUrlSchema = result.schema.DATABASE_URL as z.ZodTypeAny;
+    const dbUrlSchema = result.schema.shape.DATABASE_URL as z.ZodTypeAny;
     expect(dbUrlSchema.safeParse("mongodb://localhost:27017").success).toBe(
       true,
     );
     expect(dbUrlSchema.safeParse("not-a-url").success).toBe(false);
     // dbSource schema accepts "local"/"hosted" and undefined.
-    const dbSourceSchema = result.schema.DB_SOURCE as z.ZodTypeAny;
+    const dbSourceSchema = result.schema.shape.DB_SOURCE as z.ZodTypeAny;
     expect(dbSourceSchema.safeParse("local").success).toBe(true);
     expect(dbSourceSchema.safeParse("hosted").success).toBe(true);
     expect(dbSourceSchema.safeParse(undefined).success).toBe(true);

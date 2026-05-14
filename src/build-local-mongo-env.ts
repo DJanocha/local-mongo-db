@@ -14,11 +14,11 @@ export type LocalMongoEnvKeyMapper = {
   dbSource: readonly string[];
 };
 
-export type LocalMongoEnvSchema = Record<string, z.ZodTypeAny>;
+export type LocalMongoEnvSchema = z.ZodObject<z.ZodRawShape>;
 
 export type BuildLocalMongoEnvResult = {
   /**
-   * Flat Zod schema slice — spread into `createEnv({ server, client })`
+   * Zod object schema — spread `.shape` into `createEnv({ server, client })`
    * wherever each key belongs.
    */
   schema: LocalMongoEnvSchema;
@@ -34,15 +34,22 @@ type KeyTuple<T extends EnvKeyOrKeys | undefined> = T extends string
 
 type KeyUnion<T extends EnvKeyOrKeys | undefined> = KeyTuple<T>[number];
 
+type EnvShape<
+  TDbUrl extends EnvKeyOrKeys,
+  TDbSource extends EnvKeyOrKeys | undefined,
+> = { [K in KeyUnion<TDbUrl>]: z.ZodString } & {
+  [K in KeyUnion<TDbSource>]: z.ZodOptional<z.ZodEnum<["local", "hosted"]>>;
+};
+
 export type BuildLocalMongoEnvResultFor<
   TDbUrl extends EnvKeyOrKeys,
   TDbSource extends EnvKeyOrKeys | undefined,
 > = {
   /**
-   * Flat Zod schema slice — spread into `createEnv({ server, client })`
+   * Zod object schema — spread `.shape` into `createEnv({ server, client })`
    * wherever each key belongs.
    */
-  schema: Record<KeyUnion<TDbUrl> | KeyUnion<TDbSource>, z.ZodTypeAny>;
+  schema: z.ZodObject<EnvShape<TDbUrl, TDbSource>>;
   /** Mapper passed to `defineConfig({ envKeyMapper })`. */
   envKeyMapper: {
     dbUrl: KeyTuple<TDbUrl>;
@@ -88,16 +95,16 @@ export const buildLocalMongoEnv = <
     seen.set(key, "dbSource");
   }
 
-  const schema: LocalMongoEnvSchema = {};
+  const shape: z.ZodRawShape = {};
   for (const key of dbUrlKeys) {
-    schema[key] = z.string().url();
+    shape[key] = z.string().url();
   }
   for (const key of dbSourceKeys) {
-    schema[key] = z.enum(["local", "hosted"]).optional();
+    shape[key] = z.enum(["local", "hosted"]).optional();
   }
 
   return {
-    schema,
+    schema: z.object(shape),
     envKeyMapper: {
       dbUrl: dbUrlKeys,
       dbSource: dbSourceKeys,
