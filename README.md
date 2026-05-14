@@ -32,7 +32,7 @@ The CLI auto-discovers `local-mongo-db.config.{ts,js,mjs}` in the current workin
 
 ```ts
 // local-mongo-db.config.ts
-import { buildLocalMongoEnv, defineConfig } from "@danieljanocha/local-mongo-db";
+import { buildLocalMongoEnv, defineConfig } from "@danieljanocha/local-mongo-db/env";
 
 export const localMongoEnv = buildLocalMongoEnv({
   dbUrl: "DATABASE_URL",
@@ -56,6 +56,15 @@ export default defineConfig({
 All path fields (`dbSnapshotsPath`, `envLocalPath`, `envPath`) are resolved **relative to the config file's directory** — no `__dirname` / `WORKSPACE_ROOT` math needed. Absolute paths are kept as-is.
 
 Run `pnpm db:local` to launch the interactive wizard. Pass flags (`--list`, `--load-last`, etc.) to skip it.
+
+### Two entry points
+
+| Import | Contains | Use it for |
+|---|---|---|
+| `@danieljanocha/local-mongo-db` | Everything, incl. the CLI and the `mongodb` driver (Node-only) | The CLI itself; Node-only scripts. |
+| `@danieljanocha/local-mongo-db/env` | `buildLocalMongoEnv`, `defineConfig`, `resolveConfig` + types — zero `mongodb` in the import graph | Your `local-mongo-db.config.ts` and anything a browser/edge bundle can reach. |
+
+Always import from `/env` in `local-mongo-db.config.ts`. Frameworks like Next.js bundle whatever your `env.ts` transitively imports, and `env.ts` imports `localMongoEnv` from the config file — so a `.` import there pulls the `mongodb` driver into the client bundle and breaks the build with `Module not found: Can't resolve 'net'`.
 
 ## Type-safe env keys with t3-oss
 
