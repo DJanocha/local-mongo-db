@@ -28,17 +28,28 @@ You'll also need `podman`, `mongodump`, `mongorestore`, and `mongosh` on your PA
 
 The CLI auto-discovers `local-mongo-db.config.{ts,js,mjs}` in the current working directory.
 
-### 2. Create the config
+### 2. Declare the env keys
+
+Put the `buildLocalMongoEnv` call in its own file and import it from `/env/schema` — that subpath is pure Zod, with zero `node:*` imports, so any file a client/edge bundler can reach is safe to import it from:
 
 ```ts
-// local-mongo-db.config.ts
-import { buildLocalMongoEnv, defineConfig } from "@danieljanocha/local-mongo-db/env";
+// local-mongo-env.ts — bundler-safe, can be imported from anywhere
+import { buildLocalMongoEnv } from "@danieljanocha/local-mongo-db/env/schema";
 
 export const localMongoEnv = buildLocalMongoEnv({
   dbUrl: "DATABASE_URL",
   // or mirror into legacy keys: dbUrl: ["DATABASE_URL", "MONGO_URI"],
   dbSource: "NEXT_PUBLIC_DB_SOURCE", // optional label
 });
+```
+
+### 3. Create the config
+
+```ts
+// local-mongo-db.config.ts — Node-only, never reached by client bundles
+import { defineConfig } from "@danieljanocha/local-mongo-db/env";
+
+import { localMongoEnv } from "./local-mongo-env";
 
 export default defineConfig({
   containerName: "mongodb",
@@ -57,25 +68,28 @@ All path fields (`dbSnapshotsPath`, `envLocalPath`, `envPath`) are resolved **re
 
 Run `pnpm db:local` to launch the interactive wizard. Pass flags (`--list`, `--load-last`, etc.) to skip it.
 
-### Two entry points
+### Entry points
 
 | Import | Contains | Use it for |
 |---|---|---|
-| `@danieljanocha/local-mongo-db` | Everything, incl. the CLI and the `mongodb` driver (Node-only) | The CLI itself; Node-only scripts. |
-| `@danieljanocha/local-mongo-db/env` | `buildLocalMongoEnv`, `defineConfig`, `resolveConfig` + types — zero `mongodb` in the import graph | Your `local-mongo-db.config.ts` and anything a browser/edge bundle can reach. |
+| `@danieljanocha/local-mongo-db` | Everything, incl. the CLI and the `mongodb` driver | Node-only scripts and the CLI itself. |
+| `@danieljanocha/local-mongo-db/env` | `defineConfig`, `resolveConfig` + types. Uses `node:path` internally — Node-only. | Your `local-mongo-db.config.ts`. |
+| `@danieljanocha/local-mongo-db/env/schema` | `buildLocalMongoEnv` + types — pure Zod, no `node:*` imports. | Anywhere reachable by a client/edge bundler (e.g. your t3-oss `env.ts`, the file that holds `localMongoEnv`). |
 
-Always import from `/env` in `local-mongo-db.config.ts`. Frameworks like Next.js bundle whatever your `env.ts` transitively imports, and `env.ts` imports `localMongoEnv` from the config file — so a `.` import there pulls the `mongodb` driver into the client bundle and breaks the build with `Module not found: Can't resolve 'net'`.
+Why keep `localMongoEnv` in its own file: frameworks like Next.js bundle whatever your `env.ts` transitively imports. If `localMongoEnv` lived in `local-mongo-db.config.ts`, then importing it into `env.ts` would drag `defineConfig` (and its `node:path` import) into the client bundle and break the build with `Module not found: Can't resolve 'path'`. A dedicated `local-mongo-env.ts` keeps the schema side bundler-safe and the config side Node-only.
+
+> Earlier versions of this README imported `buildLocalMongoEnv` from `/env`. That still works for back-compat, but `/env` also exposes `defineConfig` / `resolveConfig` and therefore pulls `node:path` into the import graph — prefer `/env/schema` for any file a client bundle can reach.
 
 ## Type-safe env keys with t3-oss
 
-`buildLocalMongoEnv` returns a Zod object schema alongside the mapper. Spread its `.shape` into your `@t3-oss/env-*` setup and the same env keys validate at startup:
+`buildLocalMongoEnv` returns a Zod object schema alongside the mapper. Import `localMongoEnv` from the dedicated file (above) and spread its `.shape` into your `@t3-oss/env-*` setup — the same env keys validate at startup, and the import graph stays bundler-safe:
 
 ```ts
-// env.ts
+// env.ts — bundler-safe; reachable from client code
 import { createEnv } from "@t3-oss/env-nextjs";
 import { z } from "zod";
 
-import { localMongoEnv } from "../local-mongo-db.config";
+import { localMongoEnv } from "./local-mongo-env";
 
 export const env = createEnv({
   server: {
@@ -89,7 +103,7 @@ export const env = createEnv({
 });
 ```
 
-Single source of truth: the env-var names live in your `local-mongo-db.config.ts`, both the runtime injector and your env schema derive from the same builder call.
+Single source of truth: the env-var names live in `local-mongo-env.ts`; both the runtime injector (via `local-mongo-db.config.ts`) and your env schema (via `env.ts`) derive from the same builder call.
 
 ## Configuration reference
 

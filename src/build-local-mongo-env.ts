@@ -64,6 +64,23 @@ const toArray = (value: EnvKeyOrKeys | undefined): string[] => {
   return typeof value === "string" ? [value] : [...value];
 };
 
+/**
+ * Pure (zod-only, no `node:*` imports) schema factory. Safe to import from
+ * any file a client/edge bundler can reach — import it from
+ * `@danieljanocha/local-mongo-db/env/schema`.
+ *
+ * Returns:
+ * - `schema` — Zod object; spread `.shape` into `createEnv({ server, client })`
+ *   wherever each key belongs.
+ * - `envKeyMapper` — pass to `defineConfig({ envKeyMapper })` inside your
+ *   `local-mongo-db.config.ts`.
+ *
+ * The same export is also reachable via `@danieljanocha/local-mongo-db/env`
+ * for back-compat, but that path also pulls `defineConfig` / `resolveConfig`
+ * (which import `node:path`) into the import graph, so bundlers targeting the
+ * browser may fail to resolve `node:path`. Prefer `/env/schema` for any file
+ * a client bundle can reach.
+ */
 export const buildLocalMongoEnv = <
   const TDbUrl extends EnvKeyOrKeys,
   const TDbSource extends EnvKeyOrKeys | undefined = undefined,
