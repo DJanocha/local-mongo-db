@@ -60,9 +60,7 @@ describe("data-flow against mongo-memory-server", () => {
     writeEnvFile(envPath, [{ envKey: "DATABASE_URL", value: hosted.uri }]);
 
     // Local env file points at local MMS — used by push() to read the source.
-    writeEnvFile(envLocalPath, [
-      { envKey: "DATABASE_URL", value: local.uri },
-    ]);
+    writeEnvFile(envLocalPath, [{ envKey: "DATABASE_URL", value: local.uri }]);
 
     manager = new LocalMongoManager(
       resolveConfig({
@@ -124,6 +122,22 @@ describe("data-flow against mongo-memory-server", () => {
       const ok = manager.pull();
       expect(ok).toBe(true);
       expect(await readUsers(local.uri, DB_NAME)).toEqual(SAMPLE_USERS);
+    });
+
+    it("handles hosted URIs with `&` query params (Atlas-style)", async () => {
+      // Regression: an unquoted `&` in a shell command backgrounded mongodump
+      // without `--out`, so the dump landed in cwd and the restore never ran.
+      writeEnvFile(envPath, [
+        {
+          envKey: "DATABASE_URL",
+          value: `${hosted.uri}?retryWrites=true&w=majority`,
+        },
+      ]);
+      await seedUsers(hosted.uri, DB_NAME, SAMPLE_USERS);
+
+      expect(manager.pull()).toBe(true);
+      expect(await readUsers(local.uri, DB_NAME)).toEqual(SAMPLE_USERS);
+      expect(fs.readdirSync(path.join(dbSnapshotsPath, "dump"))).toEqual([]);
     });
 
     it("does NOT mutate the hosted DB during a pull", async () => {

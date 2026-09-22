@@ -1,14 +1,11 @@
-import { execSync, spawn } from "node:child_process";
+import { execFileSync, execSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
 import { format } from "date-fns";
 import { MongoClient } from "mongodb";
 
-import type {
-  EnvVariable,
-  ResolvedLocalMongoConfig,
-} from "./define-config";
+import type { EnvVariable, ResolvedLocalMongoConfig } from "./define-config";
 import { appendEnvVars, readEnvKey, removeEnvKeys } from "./env-file";
 import { delay } from "./utils/async";
 import { colors } from "./utils/colors";
@@ -110,9 +107,7 @@ export class LocalMongoManager {
     }
   }
 
-  private async waitForMongoDB(
-    proc: ReturnType<typeof spawn>,
-  ): Promise<void> {
+  private async waitForMongoDB(proc: ReturnType<typeof spawn>): Promise<void> {
     const maxAttempts = 60;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       if (proc.exitCode !== null) {
@@ -207,8 +202,13 @@ export class LocalMongoManager {
   private writeDbToBsonFile({ filePath }: { filePath: string }): boolean {
     log.step(`Writing database to BSON file: ${filePath}`);
     try {
-      execSync(
-        `mongodump --uri="mongodb://localhost:${this.config.port}" --archive="${filePath}" --quiet`,
+      execFileSync(
+        "mongodump",
+        [
+          `--uri=mongodb://localhost:${this.config.port}`,
+          `--archive=${filePath}`,
+          "--quiet",
+        ],
         { stdio: "ignore" },
       );
       return true;
@@ -248,16 +248,23 @@ export class LocalMongoManager {
     return value;
   }
 
-  private nsArgs(): string {
+  /** `--nsFrom`/`--nsTo` as argv entries, for `execFileSync` (no shell). */
+  private nsArgv(): string[] {
     const ns = this.config.namespaceTransform;
-    if (!ns) return "";
-    return ` --nsFrom="${ns.from}" --nsTo="${ns.to}"`;
+    if (!ns) return [];
+    return [`--nsFrom=${ns.from}`, `--nsTo=${ns.to}`];
   }
 
   private loadDbFromBsonFile({ filePath }: { filePath: string }): boolean {
     try {
-      execSync(
-        `mongorestore --uri="mongodb://localhost:${this.config.port}" --archive="${filePath}" --drop${this.nsArgs()}`,
+      execFileSync(
+        "mongorestore",
+        [
+          `--uri=mongodb://localhost:${this.config.port}`,
+          `--archive=${filePath}`,
+          "--drop",
+          ...this.nsArgv(),
+        ],
         { stdio: "inherit" },
       );
       return true;
@@ -329,9 +336,7 @@ export class LocalMongoManager {
   ): Promise<boolean> {
     try {
       if (!fs.existsSync(this.config.envPath)) {
-        throw new Error(
-          `Environment file not found at ${this.config.envPath}`,
-        );
+        throw new Error(`Environment file not found at ${this.config.envPath}`);
       }
       if (!this.hostedAtlasUri) {
         this.hostedAtlasUri = this.getHostedAtlasUri();
@@ -343,21 +348,25 @@ export class LocalMongoManager {
       }
 
       log.step(`Dumping database ${baseDbName}...`);
-      execSync(
-        `mongodump --uri="${this.hostedAtlasUri}" --db ${baseDbName} --out "${backupPath}"`,
-      );
+      execFileSync("mongodump", [
+        `--uri=${this.hostedAtlasUri}`,
+        `--db=${baseDbName}`,
+        `--out=${backupPath}`,
+      ]);
 
       log.step(`Restoring to new database ${copiedDbName}...`);
-      execSync(
-        `mongorestore --uri="${this.hostedAtlasUri}" --db ${copiedDbName} "${backupPath}/${baseDbName}" --drop${this.nsArgs()}`,
-      );
+      execFileSync("mongorestore", [
+        `--uri=${this.hostedAtlasUri}`,
+        `--db=${copiedDbName}`,
+        path.join(backupPath, baseDbName),
+        "--drop",
+        ...this.nsArgv(),
+      ]);
 
       log.step("Cleaning up temporary files...");
-      execSync(`rm -rf "${backupPath}"`);
+      fs.rmSync(backupPath, { recursive: true, force: true });
 
-      log.success(
-        `Successfully duplicated ${baseDbName} to ${copiedDbName}!`,
-      );
+      log.success(`Successfully duplicated ${baseDbName} to ${copiedDbName}!`);
       return true;
     } catch (error) {
       log.error("Error:", (error as Error).message);
@@ -474,19 +483,36 @@ export class LocalMongoManager {
       log.info(
         `Pulling data from hosted MongoDB connection string: ${this.maskConnectionString(atlasUrl)}...`,
       );
-      execSync(`mongodump --uri=${atlasUrl} --out="${this.dumpPath}"`);
-      execSync(
-        `mongorestore --uri="mongodb://localhost:${this.config.port}" "${this.dumpPath}" --drop${this.nsArgs()}`,
-      );
+      // execFileSync (no shell): Atlas URIs contain `&`, which a shell would
+      // treat as "background this", dropping `--out` and dumping into cwd.
+      execFileSync("mongodump", [
+        `--uri=${atlasUrl}`,
+        `--out=${this.dumpPath}`,
+      ]);
+      execFileSync("mongorestore", [
+        `--uri=mongodb://localhost:${this.config.port}`,
+        this.dumpPath,
+        "--drop",
+        ...this.nsArgv(),
+      ]);
       log.success("Data pulled successfully!");
 
       log.step("Cleaning up temporary dump data...");
-      execSync(`rm -rf "${this.dumpPath}"/*`);
+      this.clearDumpDir();
       log.success("Cleanup complete!");
       return true;
     } catch (error) {
       log.error("Error:", (error as Error).message);
       return false;
+    }
+  }
+
+  private clearDumpDir() {
+    for (const entry of fs.readdirSync(this.dumpPath)) {
+      fs.rmSync(path.join(this.dumpPath, entry), {
+        recursive: true,
+        force: true,
+      });
     }
   }
 
@@ -517,14 +543,16 @@ export class LocalMongoManager {
         const tempArchive = path.join(this.dumpPath, "_temp_push.bson");
 
         log.step("\nCreating temporary archive from local database...");
-        execSync(
-          `mongodump --uri="${localDbUri}" --archive="${tempArchive}" --quiet`,
+        execFileSync(
+          "mongodump",
+          [`--uri=${localDbUri}`, `--archive=${tempArchive}`, "--quiet"],
           { stdio: "ignore" },
         );
 
         log.step("Restoring to hosted MongoDB...");
-        execSync(
-          `mongorestore --uri="${atlasUrl}" --archive="${tempArchive}" --drop`,
+        execFileSync(
+          "mongorestore",
+          [`--uri=${atlasUrl}`, `--archive=${tempArchive}`, "--drop"],
           { stdio: "inherit" },
         );
 
@@ -545,8 +573,9 @@ export class LocalMongoManager {
 
         log.info(`Pushing snapshot "${source}" to hosted MongoDB...`);
 
-        execSync(
-          `mongorestore --uri="${atlasUrl}" --archive="${loadPath}" --drop`,
+        execFileSync(
+          "mongorestore",
+          [`--uri=${atlasUrl}`, `--archive=${loadPath}`, "--drop"],
           { stdio: "inherit" },
         );
 
@@ -556,10 +585,7 @@ export class LocalMongoManager {
         return true;
       }
     } catch (error) {
-      log.error(
-        "Failed to push to hosted MongoDB:",
-        (error as Error).message,
-      );
+      log.error("Failed to push to hosted MongoDB:", (error as Error).message);
       return false;
     }
   }
@@ -617,10 +643,7 @@ export class LocalMongoManager {
 
   save(name: string): string | null {
     const slug = createSnapshotSlug(name);
-    const savePath = path.join(
-      this.config.dbSnapshotsPath,
-      `${slug}.bson`,
-    );
+    const savePath = path.join(this.config.dbSnapshotsPath, `${slug}.bson`);
 
     log.info("Saving current database state...");
     if (this.writeDbToBsonFile({ filePath: savePath })) {
