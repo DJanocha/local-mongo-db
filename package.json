@@ -1,6 +1,6 @@
 {
   "name": "@danieljanocha/local-mongo-db",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "description": "Reusable CLI for managing a local MongoDB container (podman) with snapshots, pull/push to a hosted Atlas, and configurable env-var injection.",
   "license": "MIT",
   "author": "Daniel Janocha",
@@ -35,6 +35,7 @@
   ],
   "scripts": {
     "build": "tsup",
+    "prepublishOnly": "pnpm typecheck && pnpm test && pnpm build",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "preview": "tsx src/preview.ts",
